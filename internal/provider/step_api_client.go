@@ -55,6 +55,24 @@ type stepAPIClient struct {
 	adminCertExpiry   time.Time
 }
 
+type issueCertificateRequest struct {
+	CommonName          string
+	SANs                []string
+	Provisioner         string
+	ProvisionerPassword string
+	NotAfter            string
+}
+
+type issuedCertificate struct {
+	LeafPEM       string
+	CertChainPEM  string
+	CaPEM         string
+	PrivateKeyPEM string
+	NotBefore     time.Time
+	NotAfter      time.Time
+	SerialNumber  string
+}
+
 type apiStatusError struct {
 	StatusCode int
 	Body       string
@@ -252,6 +270,10 @@ func (c *stepAPIClient) ensureAdminIdentity(ctx context.Context) error {
 }
 
 func (c *stepAPIClient) lookupJWKProvisionerKID(ctx context.Context) (string, error) {
+	return c.lookupJWKProvisionerKIDByName(ctx, c.adminProvisioner)
+}
+
+func (c *stepAPIClient) lookupJWKProvisionerKIDByName(ctx context.Context, provisionerName string) (string, error) {
 	body, err := c.requestPublic(ctx, http.MethodGet, "/provisioners", nil)
 	if err != nil {
 		return "", fmt.Errorf("list provisioners: %w", err)
@@ -267,22 +289,22 @@ func (c *stepAPIClient) lookupJWKProvisionerKID(ctx context.Context) (string, er
 	for _, p := range payload.Provisioners {
 		name, _ := p["name"].(string)
 		typ, _ := p["type"].(string)
-		if name != c.adminProvisioner || strings.ToUpper(typ) != "JWK" {
+		if name != provisionerName || strings.ToUpper(typ) != "JWK" {
 			continue
 		}
 
 		keyObj, ok := p["key"].(map[string]any)
 		if !ok {
-			return "", fmt.Errorf("provisioner %q is missing key object", c.adminProvisioner)
+			return "", fmt.Errorf("provisioner %q is missing key object", provisionerName)
 		}
 		kid, _ := keyObj["kid"].(string)
 		if strings.TrimSpace(kid) == "" {
-			return "", fmt.Errorf("provisioner %q key is missing kid", c.adminProvisioner)
+			return "", fmt.Errorf("provisioner %q key is missing kid", provisionerName)
 		}
 		return kid, nil
 	}
 
-	return "", fmt.Errorf("JWK provisioner %q not found", c.adminProvisioner)
+	return "", fmt.Errorf("JWK provisioner %q not found", provisionerName)
 }
 
 func (c *stepAPIClient) getEncryptedProvisionerKey(ctx context.Context, kid string) (string, error) {
@@ -322,6 +344,22 @@ func decryptProvisionerJWK(encryptedKey string, password string) (*jose.JSONWebK
 }
 
 func (c *stepAPIClient) generateProvisionerSignToken(jwk *jose.JSONWebKey, kid string) (string, error) {
+	return c.generateProvisionerSignTokenWithClaims(
+		jwk,
+		kid,
+		c.adminProvisioner,
+		c.adminSubject,
+		[]string{c.adminSubject},
+	)
+}
+
+func (c *stepAPIClient) generateProvisionerSignTokenWithClaims(
+	jwk *jose.JSONWebKey,
+	kid string,
+	provisioner string,
+	subject string,
+	sans []string,
+) (string, error) {
 	aud := c.baseURL + "/1.0/sign"
 	now := time.Now().UTC()
 
@@ -333,13 +371,13 @@ func (c *stepAPIClient) generateProvisionerSignToken(jwk *jose.JSONWebKey, kid s
 	tokOptions := []stepToken.Options{
 		stepToken.WithJWTID(jwtID),
 		stepToken.WithKid(kid),
-		stepToken.WithIssuer(c.adminProvisioner),
+		stepToken.WithIssuer(provisioner),
 		stepToken.WithAudience(aud),
 		stepToken.WithValidity(now, now.Add(stepToken.DefaultValidity)),
-		stepToken.WithSANS([]string{c.adminSubject}),
+		stepToken.WithSANS(sans),
 	}
 
-	tok, err := stepProvision.New(c.adminSubject, tokOptions...)
+	tok, err := stepProvision.New(subject, tokOptions...)
 	if err != nil {
 		return "", fmt.Errorf("create provisioning token: %w", err)
 	}
@@ -357,6 +395,66 @@ func (c *stepAPIClient) generateProvisionerSignToken(jwk *jose.JSONWebKey, kid s
 		return "", fmt.Errorf("sign provisioning token: %w", err)
 	}
 	return signed, nil
+}
+
+func (c *stepAPIClient) issueCertificate(ctx context.Context, req issueCertificateRequest) (*issuedCertificate, error) {
+	kid, err := c.lookupJWKProvisionerKIDByName(ctx, req.Provisioner)
+	if err != nil {
+		return nil, err
+	}
+
+	encryptedKey, err := c.getEncryptedProvisionerKey(ctx, kid)
+	if err != nil {
+		return nil, err
+	}
+
+	jwk, err := decryptProvisionerJWK(encryptedKey, req.ProvisionerPassword)
+	if err != nil {
+		return nil, err
+	}
+
+	sans := uniqueSANs(append([]string{req.CommonName}, req.SANs...))
+	ott, err := c.generateProvisionerSignTokenWithClaims(jwk, kid, req.Provisioner, req.CommonName, sans)
+	if err != nil {
+		return nil, err
+	}
+
+	privateKeyPEM, csrPEM, err := generateLeafCSR(req.CommonName, sans)
+	if err != nil {
+		return nil, err
+	}
+
+	signReq := map[string]any{
+		"csr": csrPEM,
+		"ott": ott,
+	}
+	if strings.TrimSpace(req.NotAfter) != "" {
+		signReq["notAfter"] = strings.TrimSpace(req.NotAfter)
+	}
+
+	signResp, err := c.signCSR(ctx, signReq)
+	if err != nil {
+		return nil, err
+	}
+
+	certPEMs, err := certChainStrings(signResp)
+	if err != nil {
+		return nil, err
+	}
+	leaf, err := parsePEMCertificate(certPEMs[0])
+	if err != nil {
+		return nil, err
+	}
+
+	return &issuedCertificate{
+		LeafPEM:       certPEMs[0],
+		CertChainPEM:  strings.Join(certPEMs, "\n"),
+		CaPEM:         strings.Join(certPEMs[1:], "\n"),
+		PrivateKeyPEM: privateKeyPEM,
+		NotBefore:     leaf.NotBefore,
+		NotAfter:      leaf.NotAfter,
+		SerialNumber:  leaf.SerialNumber.String(),
+	}, nil
 }
 
 func generateAdminCSR(subject string) (crypto.Signer, string, error) {
@@ -381,6 +479,36 @@ func generateAdminCSR(subject string) (crypto.Signer, string, error) {
 
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 	return adminKey, string(csrPEM), nil
+}
+
+func generateLeafCSR(commonName string, sans []string) (string, string, error) {
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", fmt.Errorf("generate leaf private key: %w", err)
+	}
+
+	dnsNames, ips, emails, uris := splitSANs(sans)
+	tpl := &x509.CertificateRequest{
+		Subject:        pkix.Name{CommonName: commonName},
+		DNSNames:       dnsNames,
+		IPAddresses:    ips,
+		EmailAddresses: emails,
+		URIs:           uris,
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, tpl, leafKey)
+	if err != nil {
+		return "", "", fmt.Errorf("create leaf certificate request: %w", err)
+	}
+
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(leafKey)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal leaf private key: %w", err)
+	}
+
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})
+	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
+	return string(privateKeyPEM), string(csrPEM), nil
 }
 
 func splitSANs(sans []string) ([]string, []net.IP, []string, []*url.URL) {
@@ -418,9 +546,17 @@ func (c *stepAPIClient) signAdminCSR(ctx context.Context, csrPEM string, ott str
 		"ott": ott,
 	}
 
+	response, err := c.signCSR(ctx, payload)
+	if err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
+func (c *stepAPIClient) signCSR(ctx context.Context, payload map[string]any) (map[string]any, error) {
 	body, err := c.requestPublic(ctx, http.MethodPost, "/1.0/sign", payload)
 	if err != nil {
-		return nil, fmt.Errorf("sign admin certificate: %w", err)
+		return nil, fmt.Errorf("sign certificate: %w", err)
 	}
 
 	var response map[string]any
@@ -432,6 +568,27 @@ func (c *stepAPIClient) signAdminCSR(ctx context.Context, csrPEM string, ott str
 }
 
 func parseCertChain(signResponse map[string]any) ([]*x509.Certificate, []string, time.Time, error) {
+	certStrings, err := certChainStrings(signResponse)
+	if err != nil {
+		return nil, nil, time.Time{}, err
+	}
+
+	chain := make([]*x509.Certificate, 0, len(certStrings))
+	chainB64 := make([]string, 0, len(certStrings))
+	for _, certPEM := range certStrings {
+		cert, err := parsePEMCertificate(certPEM)
+		if err != nil {
+			return nil, nil, time.Time{}, err
+		}
+		chain = append(chain, cert)
+		chainB64 = append(chainB64, base64.StdEncoding.EncodeToString(cert.Raw))
+	}
+
+	leafExpiry := chain[0].NotAfter
+	return chain, chainB64, leafExpiry, nil
+}
+
+func certChainStrings(signResponse map[string]any) ([]string, error) {
 	certStrings := make([]string, 0)
 
 	if chainRaw, ok := signResponse["certChain"].([]any); ok {
@@ -449,22 +606,10 @@ func parseCertChain(signResponse map[string]any) ([]*x509.Certificate, []string,
 	}
 
 	if len(certStrings) == 0 {
-		return nil, nil, time.Time{}, fmt.Errorf("sign response did not include certificate chain")
+		return nil, fmt.Errorf("sign response did not include certificate chain")
 	}
 
-	chain := make([]*x509.Certificate, 0, len(certStrings))
-	chainB64 := make([]string, 0, len(certStrings))
-	for _, certPEM := range certStrings {
-		cert, err := parsePEMCertificate(certPEM)
-		if err != nil {
-			return nil, nil, time.Time{}, err
-		}
-		chain = append(chain, cert)
-		chainB64 = append(chainB64, base64.StdEncoding.EncodeToString(cert.Raw))
-	}
-
-	leafExpiry := chain[0].NotAfter
-	return chain, chainB64, leafExpiry, nil
+	return certStrings, nil
 }
 
 func parsePEMCertificate(certPEM string) (*x509.Certificate, error) {
@@ -559,4 +704,21 @@ func asStatusError(err error, target **apiStatusError) bool {
 	}
 	*target = typed
 	return true
+}
+
+func uniqueSANs(sans []string) []string {
+	seen := make(map[string]struct{}, len(sans))
+	out := make([]string, 0, len(sans))
+	for _, san := range sans {
+		s := strings.TrimSpace(san)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
 }

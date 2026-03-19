@@ -10,9 +10,10 @@ Use the provider source:
 
 ## Status
 
-This provider is under active development and currently exposes one resource:
+This provider is under active development and currently exposes these resources:
 
 - `stepca_provisioner`
+- `stepca_certificate`
 
 ## Requirements
 
@@ -37,6 +38,7 @@ Provider and resource documentation:
 
 - [Provider docs](./docs/index.md)
 - [stepca_provisioner resource docs](./docs/resources/provisioner.md)
+- [stepca_certificate resource docs](./docs/resources/certificate.md)
 
 ## Release
 

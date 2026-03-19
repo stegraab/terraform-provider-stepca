@@ -180,6 +180,7 @@ func (p *stepCAProvider) Configure(ctx context.Context, req provider.ConfigureRe
 func (p *stepCAProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewProvisionerResource,
+		NewCertificateResource,
 	}
 }
 
