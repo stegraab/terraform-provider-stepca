@@ -1,6 +1,9 @@
 package provider
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
 	"testing"
@@ -23,20 +26,22 @@ func TestUniqueSANs(t *testing.T) {
 	}
 }
 
-func TestGenerateLeafCSR(t *testing.T) {
+func TestBuildCSRFromPrivateKeyPEM(t *testing.T) {
 	t.Parallel()
 
-	privateKeyPEM, csrPEM, err := generateLeafCSR("ca.example.internal", []string{"ca.example.internal", "10.0.0.1"})
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("generateLeafCSR returned error: %v", err)
+		t.Fatalf("failed to generate key: %v", err)
 	}
+	pkcs8, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("failed to marshal key: %v", err)
+	}
+	privateKeyPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8}))
 
-	keyBlock, _ := pem.Decode([]byte(privateKeyPEM))
-	if keyBlock == nil || keyBlock.Type != "PRIVATE KEY" {
-		t.Fatalf("expected PRIVATE KEY PEM block, got %#v", keyBlock)
-	}
-	if _, err := x509.ParsePKCS8PrivateKey(keyBlock.Bytes); err != nil {
-		t.Fatalf("failed to parse PKCS8 private key: %v", err)
+	csrPEM, err := buildCSRFromPrivateKeyPEM("ca.example.internal", []string{"ca.example.internal", "10.0.0.1"}, privateKeyPEM)
+	if err != nil {
+		t.Fatalf("buildCSRFromPrivateKeyPEM returned error: %v", err)
 	}
 
 	csrBlock, _ := pem.Decode([]byte(csrPEM))
@@ -56,6 +61,14 @@ func TestGenerateLeafCSR(t *testing.T) {
 	}
 	if len(csr.IPAddresses) != 1 || csr.IPAddresses[0].String() != "10.0.0.1" {
 		t.Fatalf("unexpected IP SANs: %#v", csr.IPAddresses)
+	}
+}
+
+func TestParsePrivateKeyPEM(t *testing.T) {
+	t.Parallel()
+
+	if _, err := parsePrivateKeyPEM("not a key"); err == nil {
+		t.Fatal("expected error for invalid PEM")
 	}
 }
 

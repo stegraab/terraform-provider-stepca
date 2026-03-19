@@ -27,13 +27,13 @@ type certificateResourceModel struct {
 	ProvisionerName            types.String `tfsdk:"provisioner_name"`
 	ProvisionerPassword        types.String `tfsdk:"provisioner_password_wo"`
 	ProvisionerPasswordVersion types.String `tfsdk:"provisioner_password_version"`
+	PrivateKeyPEM              types.String `tfsdk:"private_key_pem_wo"`
 	SANs                       types.Set    `tfsdk:"sans"`
 	NotAfter                   types.String `tfsdk:"not_after"`
 	RenewalVersion             types.String `tfsdk:"renewal_version"`
 	CertificatePEM             types.String `tfsdk:"certificate_pem"`
 	CertificateChainPEM        types.String `tfsdk:"certificate_chain_pem"`
 	CAPEM                      types.String `tfsdk:"ca_pem"`
-	PrivateKeyPEM              types.String `tfsdk:"private_key_pem"`
 	SerialNumber               types.String `tfsdk:"serial_number"`
 	NotBefore                  types.String `tfsdk:"not_before"`
 	ExpiresAt                  types.String `tfsdk:"expires_at"`
@@ -83,6 +83,12 @@ func (r *certificateResource) Schema(_ context.Context, _ resource.SchemaRequest
 				},
 				Description: "Version marker for provisioner password rotation. Bump this to force certificate re-issuance.",
 			},
+			"private_key_pem_wo": schema.StringAttribute{
+				Required:    true,
+				Sensitive:   true,
+				WriteOnly:   true,
+				Description: "PEM encoded private key used to build the CSR. Never stored in Terraform state.",
+			},
 			"sans": schema.SetAttribute{
 				Optional:    true,
 				ElementType: types.StringType,
@@ -116,11 +122,6 @@ func (r *certificateResource) Schema(_ context.Context, _ resource.SchemaRequest
 			"ca_pem": schema.StringAttribute{
 				Computed:    true,
 				Description: "CA chain PEM without the leaf certificate.",
-			},
-			"private_key_pem": schema.StringAttribute{
-				Computed:    true,
-				Sensitive:   true,
-				Description: "Generated private key PEM for the issued certificate.",
 			},
 			"serial_number": schema.StringAttribute{
 				Computed:    true,
@@ -168,6 +169,7 @@ func (r *certificateResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 	plan.ProvisionerPassword = config.ProvisionerPassword
+	plan.PrivateKeyPEM = config.PrivateKeyPEM
 
 	sans := make([]string, 0)
 	resp.Diagnostics.Append(plan.SANs.ElementsAs(ctx, &sans, false)...)
@@ -180,6 +182,7 @@ func (r *certificateResource) Create(ctx context.Context, req resource.CreateReq
 		SANs:                sans,
 		Provisioner:         plan.ProvisionerName.ValueString(),
 		ProvisionerPassword: plan.ProvisionerPassword.ValueString(),
+		PrivateKeyPEM:       plan.PrivateKeyPEM.ValueString(),
 		NotAfter:            plan.NotAfter.ValueString(),
 	})
 	if err != nil {
@@ -191,11 +194,11 @@ func (r *certificateResource) Create(ctx context.Context, req resource.CreateReq
 	plan.CertificatePEM = types.StringValue(issued.LeafPEM)
 	plan.CertificateChainPEM = types.StringValue(issued.CertChainPEM)
 	plan.CAPEM = types.StringValue(issued.CaPEM)
-	plan.PrivateKeyPEM = types.StringValue(issued.PrivateKeyPEM)
 	plan.SerialNumber = types.StringValue(issued.SerialNumber)
 	plan.NotBefore = types.StringValue(issued.NotBefore.UTC().Format("2006-01-02T15:04:05Z"))
 	plan.ExpiresAt = types.StringValue(issued.NotAfter.UTC().Format("2006-01-02T15:04:05Z"))
 	plan.ProvisionerPassword = types.StringNull()
+	plan.PrivateKeyPEM = types.StringNull()
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
@@ -208,6 +211,7 @@ func (r *certificateResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	state.ProvisionerPassword = types.StringNull()
+	state.PrivateKeyPEM = types.StringNull()
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 

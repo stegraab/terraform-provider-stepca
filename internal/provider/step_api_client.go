@@ -60,17 +60,17 @@ type issueCertificateRequest struct {
 	SANs                []string
 	Provisioner         string
 	ProvisionerPassword string
+	PrivateKeyPEM       string
 	NotAfter            string
 }
 
 type issuedCertificate struct {
-	LeafPEM       string
-	CertChainPEM  string
-	CaPEM         string
-	PrivateKeyPEM string
-	NotBefore     time.Time
-	NotAfter      time.Time
-	SerialNumber  string
+	LeafPEM      string
+	CertChainPEM string
+	CaPEM        string
+	NotBefore    time.Time
+	NotAfter     time.Time
+	SerialNumber string
 }
 
 type apiStatusError struct {
@@ -419,7 +419,7 @@ func (c *stepAPIClient) issueCertificate(ctx context.Context, req issueCertifica
 		return nil, err
 	}
 
-	privateKeyPEM, csrPEM, err := generateLeafCSR(req.CommonName, sans)
+	csrPEM, err := buildCSRFromPrivateKeyPEM(req.CommonName, sans, req.PrivateKeyPEM)
 	if err != nil {
 		return nil, err
 	}
@@ -447,13 +447,12 @@ func (c *stepAPIClient) issueCertificate(ctx context.Context, req issueCertifica
 	}
 
 	return &issuedCertificate{
-		LeafPEM:       certPEMs[0],
-		CertChainPEM:  strings.Join(certPEMs, "\n"),
-		CaPEM:         strings.Join(certPEMs[1:], "\n"),
-		PrivateKeyPEM: privateKeyPEM,
-		NotBefore:     leaf.NotBefore,
-		NotAfter:      leaf.NotAfter,
-		SerialNumber:  leaf.SerialNumber.String(),
+		LeafPEM:      certPEMs[0],
+		CertChainPEM: strings.Join(certPEMs, "\n"),
+		CaPEM:        strings.Join(certPEMs[1:], "\n"),
+		NotBefore:    leaf.NotBefore,
+		NotAfter:     leaf.NotAfter,
+		SerialNumber: leaf.SerialNumber.String(),
 	}, nil
 }
 
@@ -481,12 +480,11 @@ func generateAdminCSR(subject string) (crypto.Signer, string, error) {
 	return adminKey, string(csrPEM), nil
 }
 
-func generateLeafCSR(commonName string, sans []string) (string, string, error) {
-	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+func buildCSRFromPrivateKeyPEM(commonName string, sans []string, privateKeyPEM string) (string, error) {
+	leafKey, err := parsePrivateKeyPEM(privateKeyPEM)
 	if err != nil {
-		return "", "", fmt.Errorf("generate leaf private key: %w", err)
+		return "", err
 	}
-
 	dnsNames, ips, emails, uris := splitSANs(sans)
 	tpl := &x509.CertificateRequest{
 		Subject:        pkix.Name{CommonName: commonName},
@@ -498,17 +496,35 @@ func generateLeafCSR(commonName string, sans []string) (string, string, error) {
 
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader, tpl, leafKey)
 	if err != nil {
-		return "", "", fmt.Errorf("create leaf certificate request: %w", err)
+		return "", fmt.Errorf("create leaf certificate request: %w", err)
 	}
 
-	pkcs8, err := x509.MarshalPKCS8PrivateKey(leafKey)
-	if err != nil {
-		return "", "", fmt.Errorf("marshal leaf private key: %w", err)
-	}
-
-	privateKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})
 	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
-	return string(privateKeyPEM), string(csrPEM), nil
+	return string(csrPEM), nil
+}
+
+func parsePrivateKeyPEM(privateKeyPEM string) (crypto.Signer, error) {
+	block, _ := pem.Decode([]byte(privateKeyPEM))
+	if block == nil {
+		return nil, fmt.Errorf("decode private key PEM: missing PEM block")
+	}
+
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		if signer, ok := key.(crypto.Signer); ok {
+			return signer, nil
+		}
+		return nil, fmt.Errorf("unsupported PKCS#8 private key type %T", key)
+	}
+
+	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+
+	return nil, fmt.Errorf("parse private key PEM: unsupported or invalid key format")
 }
 
 func splitSANs(sans []string) ([]string, []net.IP, []string, []*url.URL) {
