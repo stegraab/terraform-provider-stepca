@@ -40,13 +40,14 @@ const (
 const adminIssuer = "step-admin-client/1.0"
 
 type stepAPIClient struct {
-	baseURL          string
-	httpClient       *http.Client
-	authMode         authMode
-	token            string
-	adminProvisioner string
-	adminSubject     string
-	adminPassword    string
+	baseURL              string
+	machineEnrollmentURL string
+	httpClient           *http.Client
+	authMode             authMode
+	token                string
+	adminProvisioner     string
+	adminSubject         string
+	adminPassword        string
 
 	mu                sync.Mutex
 	adminSigner       crypto.Signer
@@ -153,7 +154,7 @@ func (c *stepAPIClient) requestPublic(ctx context.Context, method string, path s
 	return c.requestWithAuth(ctx, method, fullURL, payload, "")
 }
 
-func (c *stepAPIClient) requestWithAuth(ctx context.Context, method string, fullURL string, payload map[string]any, authHeader string) ([]byte, error) {
+func (c *stepAPIClient) requestWithAuth(ctx context.Context, method string, fullURL string, payload any, authHeader string) ([]byte, error) {
 	var bodyReader io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)

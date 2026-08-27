@@ -30,6 +30,9 @@ provider "stepca" {
   admin_provisioner = "Admin JWK"
   admin_subject     = "step"
   admin_password    = var.stepca_admin_password
+
+  # Defaults to "${url}/machine-enrollment" when omitted.
+  machine_enrollment_url = "https://ca.example.com/machine-enrollment"
 }
 ```
 
