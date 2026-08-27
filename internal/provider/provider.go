@@ -23,13 +23,14 @@ type stepCAProvider struct {
 }
 
 type stepCAProviderModel struct {
-	URL                  types.String `tfsdk:"url"`
-	MachineEnrollmentURL types.String `tfsdk:"machine_enrollment_url"`
-	Token                types.String `tfsdk:"token"`
-	AdminProvisioner     types.String `tfsdk:"admin_provisioner"`
-	AdminSubject         types.String `tfsdk:"admin_subject"`
-	AdminPassword        types.String `tfsdk:"admin_password"`
-	InsecureSkipVerify   types.Bool   `tfsdk:"insecure_skip_verify"`
+	URL                    types.String `tfsdk:"url"`
+	MachineEnrollmentURL   types.String `tfsdk:"machine_enrollment_url"`
+	MachineEnrollmentToken types.String `tfsdk:"machine_enrollment_token"`
+	Token                  types.String `tfsdk:"token"`
+	AdminProvisioner       types.String `tfsdk:"admin_provisioner"`
+	AdminSubject           types.String `tfsdk:"admin_subject"`
+	AdminPassword          types.String `tfsdk:"admin_password"`
+	InsecureSkipVerify     types.Bool   `tfsdk:"insecure_skip_verify"`
 }
 
 func New(version string) func() provider.Provider {
@@ -53,6 +54,11 @@ func (p *stepCAProvider) Schema(_ context.Context, _ provider.SchemaRequest, res
 			"machine_enrollment_url": schema.StringAttribute{
 				Optional:    true,
 				Description: "Machine enrollment API base URL. Defaults to <url>/machine-enrollment and can also be set via STEPCA_MACHINE_ENROLLMENT_URL.",
+			},
+			"machine_enrollment_token": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				Description: "Local-development token for the machine enrollment API. Production JWK authentication does not require this value.",
 			},
 			"token": schema.StringAttribute{
 				Optional:    true,
@@ -97,6 +103,12 @@ func (p *stepCAProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	machineEnrollmentURL, ok := configString(data.MachineEnrollmentURL, "STEPCA_MACHINE_ENROLLMENT_URL", "")
 	if !ok {
 		resp.Diagnostics.AddError("Invalid provider configuration", "`machine_enrollment_url` is unknown")
+		return
+	}
+
+	machineEnrollmentToken, ok := configString(data.MachineEnrollmentToken, "STEPCA_MACHINE_ENROLLMENT_TOKEN", "")
+	if !ok {
+		resp.Diagnostics.AddError("Invalid provider configuration", "`machine_enrollment_token` is unknown")
 		return
 	}
 
@@ -168,12 +180,13 @@ func (p *stepCAProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: insecureSkipVerify}
 
 	client := &stepAPIClient{
-		baseURL:              normalizeBaseURL(url),
-		machineEnrollmentURL: normalizeMachineEnrollmentURL(machineEnrollmentURL, url),
-		token:                strings.TrimSpace(token),
-		adminProvisioner:     strings.TrimSpace(adminProvisioner),
-		adminSubject:         strings.TrimSpace(adminSubject),
-		adminPassword:        adminPassword,
+		baseURL:                normalizeBaseURL(url),
+		machineEnrollmentURL:   normalizeMachineEnrollmentURL(machineEnrollmentURL, url),
+		machineEnrollmentToken: strings.TrimSpace(machineEnrollmentToken),
+		token:                  strings.TrimSpace(token),
+		adminProvisioner:       strings.TrimSpace(adminProvisioner),
+		adminSubject:           strings.TrimSpace(adminSubject),
+		adminPassword:          adminPassword,
 		httpClient: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: transport,

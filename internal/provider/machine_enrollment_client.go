@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 type machineEnrollment struct {
@@ -42,7 +43,7 @@ func (c *stepAPIClient) revokeMachineEnrollment(ctx context.Context, id string) 
 
 func (c *stepAPIClient) requestMachineEnrollment(ctx context.Context, method string, path string, payload any) (machineEnrollment, error) {
 	fullURL := c.machineEnrollmentURL + path
-	authHeader, err := c.adminAuthHeader(ctx, fullURL)
+	authHeader, err := c.machineEnrollmentAuthHeader(ctx)
 	if err != nil {
 		return machineEnrollment{}, err
 	}
@@ -58,4 +59,17 @@ func (c *stepAPIClient) requestMachineEnrollment(ctx context.Context, method str
 		return machineEnrollment{}, err
 	}
 	return registration, nil
+}
+
+func (c *stepAPIClient) machineEnrollmentAuthHeader(ctx context.Context) (string, error) {
+	if token := strings.TrimSpace(c.machineEnrollmentToken); token != "" {
+		return token, nil
+	}
+	if c.authMode != authModeJWK {
+		return "", errors.New("machine enrollment requires JWK administrator authentication or machine_enrollment_token for local development")
+	}
+	if err := c.ensureAdminIdentity(ctx); err != nil {
+		return "", err
+	}
+	return c.generateAdminJWT(c.baseURL + "/admin/admins")
 }

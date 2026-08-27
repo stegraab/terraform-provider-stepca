@@ -2,10 +2,18 @@ package provider
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"go.step.sm/crypto/jose"
 )
 
 func TestMachineEnrollmentClientLifecycle(t *testing.T) {
@@ -50,10 +58,10 @@ func TestMachineEnrollmentClientLifecycle(t *testing.T) {
 	defer server.Close()
 
 	client := &stepAPIClient{
-		machineEnrollmentURL: server.URL,
-		httpClient:           server.Client(),
-		authMode:             authModeToken,
-		token:                "local-development-token",
+		machineEnrollmentURL:   server.URL,
+		machineEnrollmentToken: "local-development-token",
+		httpClient:             server.Client(),
+		authMode:               authModeToken,
 	}
 	created, err := client.createMachineEnrollment(context.Background(), machineEnrollment{
 		AttestorType: registration.AttestorType, AttestorIdentity: registration.AttestorIdentity,
@@ -69,6 +77,65 @@ func TestMachineEnrollmentClientLifecycle(t *testing.T) {
 	}
 	if err := client.revokeMachineEnrollment(context.Background(), registration.ID); err != nil {
 		t.Fatalf("revoke: %v", err)
+	}
+}
+
+func TestInactiveMachineEnrollmentStatuses(t *testing.T) {
+	t.Parallel()
+	for _, status := range []string{"expired", "revoked"} {
+		if !isInactiveMachineEnrollmentStatus(status) {
+			t.Fatalf("expected %q to be inactive", status)
+		}
+	}
+	for _, status := range []string{"pending", "attested", "issued"} {
+		if isInactiveMachineEnrollmentStatus(status) {
+			t.Fatalf("expected %q to be active", status)
+		}
+	}
+}
+
+func TestMachineEnrollmentJWKAuthTargetsStepCAValidationEndpoint(t *testing.T) {
+	t.Parallel()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &stepAPIClient{
+		baseURL:           "https://ca.example",
+		authMode:          authModeJWK,
+		adminSubject:      "terraform-admin",
+		adminSigner:       key,
+		adminSignerAlg:    jose.ES256,
+		adminX5CCertChain: []string{"Y2VydA=="},
+		adminCertExpiry:   time.Now().Add(time.Hour),
+	}
+
+	token, err := client.machineEnrollmentAuthHeader(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		t.Fatalf("unexpected JWT format: %q", token)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var claims struct {
+		Audience string `json:"aud"`
+		Subject  string `json:"sub"`
+		Issuer   string `json:"iss"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		t.Fatal(err)
+	}
+	if claims.Audience != "https://ca.example/admin/admins" {
+		t.Fatalf("unexpected audience: %#v", claims.Audience)
+	}
+	if claims.Subject != "terraform-admin" || claims.Issuer != adminIssuer {
+		t.Fatalf("unexpected claims: %#v", claims)
 	}
 }
 

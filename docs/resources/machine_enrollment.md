@@ -27,8 +27,21 @@ resource "stepca_machine_enrollment" "vm" {
 contract independent of Nutanix. Future VMware, physical TPM, and cloud-instance
 attestors can use the same resource lifecycle.
 
+For `nutanix-vtpm`, `vm_ext_id`, `generation_uuid`, and `vtpm_disk_id` are
+inventory facts only. In particular, `vtpm_disk_id` is not a TPM public key and
+does not prove possession. Certificate issuance must remain disabled until a
+nonce-bound AK/TPM quote is securely associated with the registered VM and its
+live Prism inventory.
+
 All configurable attributes are replace-only. Destroying or replacing the
 resource revokes the registration while retaining the server-side audit record.
+Production use requires provider JWK administrator authentication. For every
+request, the provider creates a fresh Step CA administrator JWT for the Step CA
+admin-validation endpoint; the enrollment service delegates validation back to
+Step CA. `machine_enrollment_token` exists only for local development.
+
+Pending registrations are short-lived. If Terraform reads an expired or revoked
+registration, it fails closed and requires an explicit resource replacement.
 
 ## Arguments
 

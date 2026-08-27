@@ -101,6 +101,9 @@ func (r *machineEnrollmentResource) Create(ctx context.Context, req resource.Cre
 		return
 	}
 	resp.Diagnostics.Append(setMachineEnrollmentState(ctx, &plan, created)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -119,8 +122,22 @@ func (r *machineEnrollmentResource) Read(ctx context.Context, req resource.ReadR
 		resp.State.RemoveResource(ctx)
 		return
 	}
+	if isInactiveMachineEnrollmentStatus(registration.Status) {
+		resp.Diagnostics.AddError(
+			"Machine enrollment is inactive",
+			fmt.Sprintf("Registration %s has status %q. Review why it became inactive, then explicitly replace this resource.", registration.ID, registration.Status),
+		)
+		return
+	}
 	resp.Diagnostics.Append(setMachineEnrollmentState(ctx, &state, registration)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func isInactiveMachineEnrollmentStatus(status string) bool {
+	return status == "expired" || status == "revoked"
 }
 
 func (r *machineEnrollmentResource) Update(_ context.Context, _ resource.UpdateRequest, resp *resource.UpdateResponse) {

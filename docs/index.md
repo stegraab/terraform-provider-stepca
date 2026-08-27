@@ -33,6 +33,9 @@ provider "stepca" {
 
   # Defaults to "${url}/machine-enrollment" when omitted.
   machine_enrollment_url = "https://ca.example.com/machine-enrollment"
+
+  # Local development only; production JWK auth mints a fresh admin JWT.
+  # machine_enrollment_token = var.machine_enrollment_token
 }
 ```
 
@@ -52,6 +55,8 @@ Configure exactly one auth mode:
 ### Optional
 
 - `url` (String) Step CA base URL (for example `https://ca.example.com`).
+- `machine_enrollment_url` (String) Machine enrollment API base URL.
+- `machine_enrollment_token` (String, Sensitive) Local-development enrollment API token.
 - `token` (String, Sensitive) Admin API JWT token for direct authentication.
 - `admin_provisioner` (String) JWK provisioner name used to mint admin credentials.
 - `admin_subject` (String) Admin subject used to mint an ephemeral admin certificate.
@@ -61,6 +66,8 @@ Configure exactly one auth mode:
 All attributes above can also be provided via environment variables:
 
 - `STEPCA_URL`
+- `STEPCA_MACHINE_ENROLLMENT_URL`
+- `STEPCA_MACHINE_ENROLLMENT_TOKEN`
 - `STEPCA_TOKEN`
 - `STEPCA_ADMIN_PROVISIONER`
 - `STEPCA_ADMIN_SUBJECT`

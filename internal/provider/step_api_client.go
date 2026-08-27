@@ -40,14 +40,15 @@ const (
 const adminIssuer = "step-admin-client/1.0"
 
 type stepAPIClient struct {
-	baseURL              string
-	machineEnrollmentURL string
-	httpClient           *http.Client
-	authMode             authMode
-	token                string
-	adminProvisioner     string
-	adminSubject         string
-	adminPassword        string
+	baseURL                string
+	machineEnrollmentURL   string
+	machineEnrollmentToken string
+	httpClient             *http.Client
+	authMode               authMode
+	token                  string
+	adminProvisioner       string
+	adminSubject           string
+	adminPassword          string
 
 	mu                sync.Mutex
 	adminSigner       crypto.Signer
