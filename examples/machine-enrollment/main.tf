@@ -11,8 +11,9 @@ terraform {
 
 resource "stepca_machine_enrollment" "vm" {
   attestor_type     = "nutanix-vtpm"
-  attestor_identity = nutanix_virtual_machine_v2.vm.ext_id
+  attestor_identity = nutanix_virtual_machine_v2.vm.bios_uuid
   attestor_claims = {
+    vm_ext_id       = nutanix_virtual_machine_v2.vm.ext_id
     generation_uuid = nutanix_virtual_machine_v2.vm.generation_uuid
     vtpm_disk_id    = nutanix_virtual_machine_v2.vm.vtpm_disk_id
     nic_ext_id      = nutanix_virtual_machine_v2.vm.nics[0].ext_id

@@ -12,8 +12,9 @@ nonce-bound proof before issuing certificates.
 ```hcl
 resource "stepca_machine_enrollment" "vm" {
   attestor_type     = "nutanix-vtpm"
-  attestor_identity = nutanix_virtual_machine_v2.vm.ext_id
+  attestor_identity = nutanix_virtual_machine_v2.vm.bios_uuid
   attestor_claims = {
+    vm_ext_id       = nutanix_virtual_machine_v2.vm.ext_id
     generation_uuid = nutanix_virtual_machine_v2.vm.generation_uuid
     vtpm_disk_id     = nutanix_virtual_machine_v2.vm.vtpm_disk_id
     nic_ext_id       = nutanix_virtual_machine_v2.vm.nics[0].ext_id
@@ -30,8 +31,12 @@ resource "stepca_machine_enrollment" "vm" {
 contract independent of Nutanix. Future VMware, physical TPM, and cloud-instance
 attestors can use the same resource lifecycle.
 
-For `nutanix-vtpm`, the service requires `generation_uuid`, `vtpm_disk_id`,
-`nic_ext_id`, `mac_address`, and `ip_address`. They are inventory facts only.
+For `nutanix-vtpm`, the attestor identity is the BIOS UUID visible to the guest
+through SMBIOS. The service requires `vm_ext_id`, `generation_uuid`,
+`vtpm_disk_id`, `nic_ext_id`, `mac_address`, and `ip_address`. The separate
+`vm_ext_id` addresses Prism; the broker verifies the live Prism `biosUuid`
+against the guest identity instead of assuming those identifiers are equal.
+These values are inventory facts only.
 In particular, `vtpm_disk_id` is not a TPM public key and does not prove
 possession. The broker re-reads all five claims from Prism and requires the
 request's real source address before accepting the NGT proof, TPM credential
@@ -45,8 +50,10 @@ request, the provider creates a fresh Step CA administrator JWT for the Step CA
 admin-validation endpoint; the enrollment service delegates validation back to
 Step CA. `machine_enrollment_token` exists only for local development.
 
-Pending registrations are short-lived. If Terraform reads an expired or revoked
-registration, it fails closed and requires an explicit resource replacement.
+Pending registrations are short-lived. Terraform preserves an expired or
+revoked registration in state and emits a warning; it never silently creates a
+new identity. After reviewing the cause, an administrator can recover with
+`terraform apply -replace=stepca_machine_enrollment.vm`.
 
 ## Arguments
 

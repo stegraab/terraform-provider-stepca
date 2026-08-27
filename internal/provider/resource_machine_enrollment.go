@@ -51,13 +51,13 @@ func (r *machineEnrollmentResource) Schema(_ context.Context, _ resource.SchemaR
 		},
 		"attestor_identity": schema.StringAttribute{
 			Required:      true,
-			Description:   "Stable inventory identity within the attestor type, for example a Nutanix VM external ID.",
+			Description:   "Stable identity observable by the attesting guest, for example a Nutanix VM BIOS UUID.",
 			PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
 		},
 		"attestor_claims": schema.MapAttribute{
 			Required:      true,
 			ElementType:   types.StringType,
-			Description:   "Expected platform claims verified during attestation, such as generation_uuid and vtpm_disk_id.",
+			Description:   "Expected platform claims verified during attestation, such as vm_ext_id, generation_uuid, and vtpm_disk_id.",
 			PlanModifiers: []planmodifier.Map{mapplanmodifier.RequiresReplace()},
 		},
 		"machine_identity": schema.StringAttribute{
@@ -123,11 +123,10 @@ func (r *machineEnrollmentResource) Read(ctx context.Context, req resource.ReadR
 		return
 	}
 	if isInactiveMachineEnrollmentStatus(registration.Status) {
-		resp.Diagnostics.AddError(
+		resp.Diagnostics.AddWarning(
 			"Machine enrollment is inactive",
-			fmt.Sprintf("Registration %s has status %q. Review why it became inactive, then explicitly replace this resource.", registration.ID, registration.Status),
+			fmt.Sprintf("Registration %s has status %q. It remains inactive until an administrator reviews the cause and explicitly runs terraform apply -replace for this resource.", registration.ID, registration.Status),
 		)
-		return
 	}
 	resp.Diagnostics.Append(setMachineEnrollmentState(ctx, &state, registration)...)
 	if resp.Diagnostics.HasError() {
