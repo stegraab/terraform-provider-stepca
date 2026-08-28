@@ -42,6 +42,9 @@ func (c *stepAPIClient) revokeMachineEnrollment(ctx context.Context, id string) 
 }
 
 func (c *stepAPIClient) requestMachineEnrollment(ctx context.Context, method string, path string, payload any) (machineEnrollment, error) {
+	if err := c.validateMachineEnrollmentTransport(); err != nil {
+		return machineEnrollment{}, err
+	}
 	fullURL := c.machineEnrollmentURL + path
 	authHeader, err := c.machineEnrollmentAuthHeader(ctx)
 	if err != nil {
@@ -59,6 +62,24 @@ func (c *stepAPIClient) requestMachineEnrollment(ctx context.Context, method str
 		return machineEnrollment{}, err
 	}
 	return registration, nil
+}
+
+func (c *stepAPIClient) validateMachineEnrollmentTransport() error {
+	endpoint, err := url.Parse(c.machineEnrollmentURL)
+	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "https" && endpoint.Scheme != "http") {
+		return errors.New("machine enrollment URL must be an absolute HTTP(S) URL")
+	}
+
+	if strings.TrimSpace(c.machineEnrollmentToken) != "" {
+		return nil
+	}
+	if endpoint.Scheme != "https" {
+		return errors.New("JWK-authenticated machine enrollment requires HTTPS")
+	}
+	if c.insecureSkipVerify {
+		return errors.New("JWK-authenticated machine enrollment requires TLS certificate verification")
+	}
+	return nil
 }
 
 func (c *stepAPIClient) machineEnrollmentAuthHeader(ctx context.Context) (string, error) {

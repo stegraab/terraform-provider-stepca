@@ -148,3 +148,38 @@ func TestNormalizeMachineEnrollmentURL(t *testing.T) {
 		t.Fatalf("explicit URL = %q", got)
 	}
 }
+
+func TestMachineEnrollmentTransportSecurity(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name               string
+		url                string
+		localToken         string
+		insecureSkipVerify bool
+		wantError          bool
+	}{
+		{name: "production HTTPS", url: "https://broker.example", wantError: false},
+		{name: "production HTTP", url: "http://broker.example", wantError: true},
+		{name: "production insecure TLS", url: "https://broker.example", insecureSkipVerify: true, wantError: true},
+		{name: "local development HTTP", url: "http://127.0.0.1:8000", localToken: "local-token", wantError: false},
+		{name: "invalid scheme", url: "file:///tmp/socket", localToken: "local-token", wantError: true},
+		{name: "relative URL", url: "/machine-enrollment", localToken: "local-token", wantError: true},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			client := &stepAPIClient{
+				machineEnrollmentURL:   test.url,
+				machineEnrollmentToken: test.localToken,
+				insecureSkipVerify:     test.insecureSkipVerify,
+			}
+			err := client.validateMachineEnrollmentTransport()
+			if (err != nil) != test.wantError {
+				t.Fatalf("validateMachineEnrollmentTransport() error = %v, wantError = %v", err, test.wantError)
+			}
+		})
+	}
+}

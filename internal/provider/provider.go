@@ -183,13 +183,15 @@ func (p *stepCAProvider) Configure(ctx context.Context, req provider.ConfigureRe
 		baseURL:                normalizeBaseURL(url),
 		machineEnrollmentURL:   normalizeMachineEnrollmentURL(machineEnrollmentURL, url),
 		machineEnrollmentToken: strings.TrimSpace(machineEnrollmentToken),
+		insecureSkipVerify:     insecureSkipVerify,
 		token:                  strings.TrimSpace(token),
 		adminProvisioner:       strings.TrimSpace(adminProvisioner),
 		adminSubject:           strings.TrimSpace(adminSubject),
 		adminPassword:          adminPassword,
 		httpClient: &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: transport,
+			Timeout:       30 * time.Second,
+			Transport:     transport,
+			CheckRedirect: rejectRedirects,
 		},
 	}
 
@@ -200,6 +202,10 @@ func (p *stepCAProvider) Configure(ctx context.Context, req provider.ConfigureRe
 	}
 
 	resp.ResourceData = client
+}
+
+func rejectRedirects(_ *http.Request, _ []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 func (p *stepCAProvider) Resources(_ context.Context) []func() resource.Resource {

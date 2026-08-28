@@ -43,6 +43,7 @@ type stepAPIClient struct {
 	baseURL                string
 	machineEnrollmentURL   string
 	machineEnrollmentToken string
+	insecureSkipVerify     bool
 	httpClient             *http.Client
 	authMode               authMode
 	token                  string

@@ -1,11 +1,19 @@
 package provider
 
 import (
+	"net/http"
 	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+func TestRejectRedirects(t *testing.T) {
+	t.Parallel()
+	if err := rejectRedirects(nil, nil); err != http.ErrUseLastResponse {
+		t.Fatalf("rejectRedirects() = %v, want http.ErrUseLastResponse", err)
+	}
+}
 
 func TestNormalizeBaseURL(t *testing.T) {
 	t.Parallel()
