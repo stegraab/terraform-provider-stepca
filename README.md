@@ -14,7 +14,6 @@ This provider is under active development and currently exposes these resources:
 
 - `stepca_provisioner`
 - `stepca_certificate`
-- `stepca_machine_enrollment`
 
 ## Requirements
 
@@ -40,7 +39,6 @@ Provider and resource documentation:
 - [Provider docs](./docs/index.md)
 - [stepca_provisioner resource docs](./docs/resources/provisioner.md)
 - [stepca_certificate resource docs](./docs/resources/certificate.md)
-- [stepca_machine_enrollment resource docs](./docs/resources/machine_enrollment.md)
 
 ## Release
 
