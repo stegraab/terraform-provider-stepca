@@ -10,13 +10,17 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/ephemeral"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-var _ provider.Provider = &stepCAProvider{}
+var (
+	_ provider.Provider                       = &stepCAProvider{}
+	_ provider.ProviderWithEphemeralResources = &stepCAProvider{}
+)
 
 type stepCAProvider struct {
 	version string
@@ -181,6 +185,12 @@ func (p *stepCAProvider) Resources(_ context.Context) []func() resource.Resource
 	return []func() resource.Resource{
 		NewProvisionerResource,
 		NewCertificateResource,
+	}
+}
+
+func (p *stepCAProvider) EphemeralResources(_ context.Context) []func() ephemeral.EphemeralResource {
+	return []func() ephemeral.EphemeralResource{
+		NewJWKKeyEphemeralResource,
 	}
 }
 
