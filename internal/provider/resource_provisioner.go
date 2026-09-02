@@ -69,6 +69,8 @@ type provisionerResourceModel struct {
 	ClaimsX509Enabled               types.Bool   `tfsdk:"claims_x509_enabled"`
 	JWKPassword                     types.String `tfsdk:"jwk_password_wo"`
 	JWKPasswordVersion              types.String `tfsdk:"jwk_password_version"`
+	JWKPrivateKey                   types.String `tfsdk:"jwk_private_key_wo"`
+	JWKPrivateKeyVersion            types.String `tfsdk:"jwk_private_key_version"`
 }
 
 func NewProvisionerResource() resource.Resource {
@@ -158,6 +160,19 @@ func (r *provisionerResource) Schema(_ context.Context, _ resource.SchemaRequest
 				},
 				Description: "Version marker for JWK password rotation. Bump this value to force resource replacement.",
 			},
+			"jwk_private_key_wo": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				WriteOnly:   true,
+				Description: "Private JWK JSON used to derive a public-key-only provisioner. The private key is never sent to Step CA or stored in Terraform state.",
+			},
+			"jwk_private_key_version": schema.StringAttribute{
+				Optional: true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+				Description: "Version marker for private JWK rotation. Bump this value to force resource replacement.",
+			},
 		},
 	}
 }
@@ -191,6 +206,7 @@ func (r *provisionerResource) Create(ctx context.Context, req resource.CreateReq
 		return
 	}
 	plan.JWKPassword = config.JWKPassword
+	plan.JWKPrivateKey = config.JWKPrivateKey
 
 	desired, ok := buildDesiredProvisioner(ctx, plan, &resp.Diagnostics)
 	if !ok {
@@ -206,7 +222,7 @@ func (r *provisionerResource) Create(ctx context.Context, req resource.CreateReq
 	if !found {
 		if isType(plan.Type, "JWK") {
 			if _, ok := desired["details"]; !ok {
-				resp.Diagnostics.AddError("Failed to create provisioner", "JWK provisioner creation requires `jwk_password_wo`.")
+				resp.Diagnostics.AddError("Failed to create provisioner", "JWK provisioner creation requires exactly one of `jwk_password_wo` or `jwk_private_key_wo`.")
 				return
 			}
 		}
@@ -232,6 +248,7 @@ func (r *provisionerResource) Create(ctx context.Context, req resource.CreateReq
 
 	plan.ID = plan.Name
 	plan.JWKPassword = types.StringNull()
+	plan.JWKPrivateKey = types.StringNull()
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -255,6 +272,7 @@ func (r *provisionerResource) Read(ctx context.Context, req resource.ReadRequest
 
 	state.ID = state.Name
 	state.JWKPassword = types.StringNull()
+	state.JWKPrivateKey = types.StringNull()
 	if t, ok := existing["type"].(string); ok && t != "" {
 		state.Type = types.StringValue(t)
 	}
@@ -274,6 +292,7 @@ func (r *provisionerResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 	plan.JWKPassword = config.JWKPassword
+	plan.JWKPrivateKey = config.JWKPrivateKey
 
 	desired, ok := buildDesiredProvisioner(ctx, plan, &resp.Diagnostics)
 	if !ok {
@@ -289,7 +308,7 @@ func (r *provisionerResource) Update(ctx context.Context, req resource.UpdateReq
 	if !found {
 		if isType(plan.Type, "JWK") {
 			if _, ok := desired["details"]; !ok {
-				resp.Diagnostics.AddError("Failed to create provisioner", "JWK provisioner creation requires `jwk_password_wo`.")
+				resp.Diagnostics.AddError("Failed to create provisioner", "JWK provisioner creation requires exactly one of `jwk_password_wo` or `jwk_private_key_wo`.")
 				return
 			}
 		}
@@ -314,6 +333,7 @@ func (r *provisionerResource) Update(ctx context.Context, req resource.UpdateReq
 
 	plan.ID = plan.Name
 	plan.JWKPassword = types.StringNull()
+	plan.JWKPrivateKey = types.StringNull()
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
@@ -440,7 +460,19 @@ func buildDesiredProvisioner(ctx context.Context, plan provisionerResourceModel,
 
 	if isType(plan.Type, "JWK") {
 		password := strings.TrimSpace(stringValue(plan.JWKPassword))
-		if password != "" {
+		privateKey := strings.TrimSpace(stringValue(plan.JWKPrivateKey))
+		if password != "" && privateKey != "" {
+			diags.AddError("Invalid JWK provisioner configuration", "Set exactly one of `jwk_password_wo` or `jwk_private_key_wo`, not both.")
+			return nil, false
+		}
+		if privateKey != "" {
+			details, err := buildPublicJWKDetails(privateKey)
+			if err != nil {
+				diags.AddError("Invalid JWK provisioner configuration", err.Error())
+				return nil, false
+			}
+			desired["details"] = details
+		} else if password != "" {
 			details, err := buildJWKDetails(password)
 			if err != nil {
 				diags.AddError("Invalid JWK provisioner configuration", err.Error())
@@ -451,6 +483,38 @@ func buildDesiredProvisioner(ctx context.Context, plan provisionerResourceModel,
 	}
 
 	return desired, true
+}
+
+func buildPublicJWKDetails(privateKeyJSON string) (map[string]any, error) {
+	var privateJWK jose.JSONWebKey
+	if err := json.Unmarshal([]byte(privateKeyJSON), &privateJWK); err != nil {
+		return nil, fmt.Errorf("decode private JWK: %w", err)
+	}
+	if !privateJWK.Valid() || privateJWK.IsPublic() {
+		return nil, fmt.Errorf("private JWK must contain a valid private signing key")
+	}
+	if _, symmetric := privateJWK.Key.([]byte); symmetric {
+		return nil, fmt.Errorf("private JWK must use asymmetric cryptography")
+	}
+
+	if strings.TrimSpace(privateJWK.KeyID) == "" {
+		thumbprint, err := privateJWK.Thumbprint(crypto.SHA256)
+		if err != nil {
+			return nil, fmt.Errorf("compute JWK thumbprint: %w", err)
+		}
+		privateJWK.KeyID = base64.RawURLEncoding.EncodeToString(thumbprint)
+	}
+
+	publicJSON, err := json.Marshal(privateJWK.Public())
+	if err != nil {
+		return nil, fmt.Errorf("marshal JWK public key: %w", err)
+	}
+
+	return map[string]any{
+		"JWK": map[string]any{
+			"publicKey": base64.StdEncoding.EncodeToString(publicJSON),
+		},
+	}, nil
 }
 
 func buildJWKDetails(password string) (map[string]any, error) {

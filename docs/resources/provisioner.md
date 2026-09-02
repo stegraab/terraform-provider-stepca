@@ -32,6 +32,24 @@ resource "stepca_provisioner" "oidc" {
 }
 ```
 
+Create a JWK provisioner that publishes only its public key. The private JWK is
+ephemeral and can also be written to a secret store through a write-only
+argument without entering Terraform state:
+
+```hcl
+ephemeral "stepca_jwk_key" "machine_enrollment" {}
+
+resource "stepca_provisioner" "machine_enrollment" {
+  name                    = "machine-enrollment"
+  type                    = "JWK"
+  jwk_private_key_wo      = ephemeral.stepca_jwk_key.machine_enrollment.private_key
+  jwk_private_key_version = "1"
+
+  claims_ssh_enabled  = true
+  claims_x509_enabled = false
+}
+```
+
 ## Schema
 
 ### Required
@@ -63,6 +81,8 @@ resource "stepca_provisioner" "oidc" {
 - `claims_x509_enabled` (Boolean)
 - `jwk_password_wo` (String, Sensitive, Write-Only) Password used to create encrypted JWK keys.
 - `jwk_password_version` (String) Version marker for JWK password rotation; bump to force replacement.
+- `jwk_private_key_wo` (String, Sensitive, Write-Only) Private JWK used to create a public-key-only provisioner. It is never sent to Step CA or stored in state. Mutually exclusive with `jwk_password_wo`.
+- `jwk_private_key_version` (String) Version marker for private JWK rotation; bump to force replacement.
 
 ### Read-Only
 

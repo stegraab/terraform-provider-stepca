@@ -2,12 +2,17 @@ package provider
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"go.step.sm/crypto/jose"
 )
 
 func TestBuildDesiredProvisionerOIDC(t *testing.T) {
@@ -102,6 +107,72 @@ func TestBuildJWKDetails(t *testing.T) {
 	}
 	if _, err := base64.StdEncoding.DecodeString(encryptedPrivateKey); err != nil {
 		t.Fatalf("encryptedPrivateKey is not valid base64: %v", err)
+	}
+}
+
+func TestBuildPublicJWKDetailsOmitsEncryptedPrivateKey(t *testing.T) {
+	t.Parallel()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate private key: %v", err)
+	}
+	privateJWK := jose.JSONWebKey{
+		Key:       key,
+		KeyID:     "machine-enrollment-test",
+		Use:       "sig",
+		Algorithm: jose.ES256,
+	}
+	privateJSON, err := json.Marshal(privateJWK)
+	if err != nil {
+		t.Fatalf("marshal private JWK: %v", err)
+	}
+
+	details, err := buildPublicJWKDetails(string(privateJSON))
+	if err != nil {
+		t.Fatalf("buildPublicJWKDetails returned error: %v", err)
+	}
+	jwkMap, ok := details["JWK"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected JWK map, got %#v", details["JWK"])
+	}
+	if _, exists := jwkMap["encryptedPrivateKey"]; exists {
+		t.Fatal("public-key-only provisioner must not include encryptedPrivateKey")
+	}
+
+	encodedPublicKey, ok := jwkMap["publicKey"].(string)
+	if !ok || encodedPublicKey == "" {
+		t.Fatalf("missing publicKey: %#v", jwkMap["publicKey"])
+	}
+	publicJSON, err := base64.StdEncoding.DecodeString(encodedPublicKey)
+	if err != nil {
+		t.Fatalf("decode public key: %v", err)
+	}
+	var publicJWK jose.JSONWebKey
+	if err := json.Unmarshal(publicJSON, &publicJWK); err != nil {
+		t.Fatalf("unmarshal public JWK: %v", err)
+	}
+	if !publicJWK.Valid() || !publicJWK.IsPublic() {
+		t.Fatal("provisioner publicKey must be a valid public JWK")
+	}
+	if publicJWK.KeyID != privateJWK.KeyID {
+		t.Fatalf("key ID mismatch: got %q, want %q", publicJWK.KeyID, privateJWK.KeyID)
+	}
+}
+
+func TestBuildDesiredProvisionerRejectsBothJWKAuthenticationModes(t *testing.T) {
+	t.Parallel()
+
+	plan := provisionerResourceModel{
+		Name:          types.StringValue("machine-enrollment"),
+		Type:          types.StringValue("JWK"),
+		JWKPassword:   types.StringValue("password"),
+		JWKPrivateKey: types.StringValue("private-key"),
+	}
+	var diags diag.Diagnostics
+	_, ok := buildDesiredProvisioner(context.Background(), plan, &diags)
+	if ok || !diags.HasError() {
+		t.Fatalf("expected mutually exclusive JWK authentication modes to fail: %+v", diags)
 	}
 }
 
