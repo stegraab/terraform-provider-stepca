@@ -41,6 +41,7 @@ type provisionerOIDCBlockModel struct {
 	ClientSecret          types.String `tfsdk:"client_secret"`
 	ConfigurationEndpoint types.String `tfsdk:"configuration_endpoint"`
 	Groups                types.Set    `tfsdk:"groups"`
+	Admins                types.Set    `tfsdk:"admins"`
 }
 
 type provisionerResourceModel struct {
@@ -129,6 +130,7 @@ func (r *provisionerResource) Schema(_ context.Context, _ resource.SchemaRequest
 					"client_secret":          schema.StringAttribute{Optional: true, Sensitive: true},
 					"configuration_endpoint": schema.StringAttribute{Optional: true},
 					"groups":                 schema.SetAttribute{Optional: true, ElementType: types.StringType},
+					"admins":                 schema.SetAttribute{Optional: true, ElementType: types.StringType, Description: "OIDC email identities allowed to request custom names and SSH host certificates. Set an empty set to revoke all configured administrators; omission preserves an unmanaged list."},
 				},
 			},
 			"acme_force_cn":                       schema.BoolAttribute{Optional: true},
@@ -426,6 +428,17 @@ func buildDesiredProvisioner(ctx context.Context, plan provisionerResourceModel,
 			oidc["groups"] = groups
 		} else if !ok {
 			return nil, false
+		}
+		if !oidcBlock.Admins.IsNull() && !oidcBlock.Admins.IsUnknown() {
+			admins, ok := decodeSetStrings(ctx, oidcBlock.Admins, diags)
+			if !ok {
+				return nil, false
+			}
+			// Emit an empty array as well so an update can revoke every admin.
+			if admins == nil {
+				admins = []string{}
+			}
+			oidc["admins"] = admins
 		}
 		if len(oidc) > 0 {
 			desired["details"] = map[string]any{
