@@ -24,12 +24,14 @@ func TestBuildDesiredProvisionerOIDC(t *testing.T) {
 			"client_secret":          types.StringType,
 			"configuration_endpoint": types.StringType,
 			"groups":                 types.SetType{ElemType: types.StringType},
+			"admins":                 types.SetType{ElemType: types.StringType},
 		},
 		map[string]attr.Value{
 			"client_id":              types.StringValue("step-ca"),
 			"client_secret":          types.StringValue("secret"),
 			"configuration_endpoint": types.StringValue("https://issuer/.well-known/openid-configuration"),
 			"groups":                 types.SetValueMust(types.StringType, []attr.Value{types.StringValue("admins")}),
+			"admins":                 types.SetNull(types.StringType),
 		},
 	)
 
@@ -215,5 +217,63 @@ func TestBuildUpdatePayloadClearsOmittedTemplates(t *testing.T) {
 	}
 	if payload["id"] != "provisioner-id" {
 		t.Fatalf("id should be preserved: %#v", payload["id"])
+	}
+}
+
+func TestOIDCAdminUpdates(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		admins    types.Set
+		wantCount int
+		managed   bool
+	}{
+		{"add", types.SetValueMust(types.StringType, []attr.Value{types.StringValue("operator@example.com")}), 1, true},
+		{"revoke", types.SetValueMust(types.StringType, []attr.Value{}), 0, true},
+		{"unmanaged", types.SetNull(types.StringType), 1, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			oidc, diags := types.ObjectValueFrom(context.Background(), map[string]attr.Type{
+				"client_id": types.StringType, "client_secret": types.StringType,
+				"configuration_endpoint": types.StringType,
+				"groups":                 types.SetType{ElemType: types.StringType},
+				"admins":                 types.SetType{ElemType: types.StringType},
+			}, provisionerOIDCBlockModel{
+				ClientID: types.StringValue("client"), ClientSecret: types.StringNull(),
+				ConfigurationEndpoint: types.StringNull(), Groups: types.SetNull(types.StringType), Admins: test.admins,
+			})
+			if diags.HasError() {
+				t.Fatal(diags)
+			}
+			plan := provisionerResourceModel{Name: types.StringValue("sso"), Type: types.StringValue("OIDC"), OIDC: oidc}
+			desired, ok := buildDesiredProvisioner(context.Background(), plan, &diags)
+			if !ok || diags.HasError() {
+				t.Fatal(diags)
+			}
+			details := desired["details"].(map[string]any)["OIDC"].(map[string]any)
+			if _, found := details["admins"]; found != test.managed {
+				t.Fatalf("unexpected admins ownership: %#v", details)
+			}
+			existing := map[string]any{"details": map[string]any{"OIDC": map[string]any{"admins": []string{"old@example.com"}}}}
+			updated, err := buildUpdatePayload(existing, desired, "sso", "OIDC")
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(updated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var result struct {
+				Details struct{ OIDC struct{ Admins []string } }
+			}
+			if err := json.Unmarshal(raw, &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Details.OIDC.Admins) != test.wantCount {
+				t.Fatalf("unexpected admin list: %s", raw)
+			}
+			if test.name == "add" && result.Details.OIDC.Admins[0] != "operator@example.com" {
+				t.Fatalf("old admin survived: %s", raw)
+			}
+		})
 	}
 }

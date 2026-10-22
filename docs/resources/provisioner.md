@@ -108,6 +108,7 @@ Optional:
 - `client_secret` (String, Sensitive)
 - `configuration_endpoint` (String)
 - `groups` (Set of String)
+- `admins` (Set of String) OIDC email identities authorized for custom certificate names and SSH host signing. Use `[]` to revoke all administrators; omit to preserve an unmanaged administrator list.
 
 ## Import
 
