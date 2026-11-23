@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -79,6 +80,42 @@ func TestBuildDesiredProvisionerOIDC(t *testing.T) {
 	groups, ok := oidcDetails["groups"].([]string)
 	if !ok || len(groups) != 1 || groups[0] != "admins" {
 		t.Fatalf("groups mismatch: %#v", oidcDetails["groups"])
+	}
+}
+
+func TestBuildDesiredProvisionerDurations(t *testing.T) {
+	t.Parallel()
+
+	plan := provisionerResourceModel{
+		Name:              types.StringValue("gateway"),
+		Type:              types.StringValue("SSHPOP"),
+		X509MaxDur:        types.StringValue("2160h"),
+		X509DefaultDur:    types.StringValue("2160h"),
+		SSHUserMinDur:     types.StringValue("5m"),
+		SSHUserMaxDur:     types.StringValue("24h"),
+		SSHUserDefaultDur: types.StringValue("16h"),
+		SSHHostMinDur:     types.StringValue("5m"),
+		SSHHostMaxDur:     types.StringValue("720h"),
+		SSHHostDefaultDur: types.StringValue("24h"),
+	}
+
+	var diags diag.Diagnostics
+	desired, ok := buildDesiredProvisioner(context.Background(), plan, &diags)
+	if !ok || diags.HasError() {
+		t.Fatalf("could not build provisioner: %+v", diags)
+	}
+
+	want := map[string]any{
+		"x509": map[string]any{
+			"durations": map[string]any{"max": "2160h", "default": "2160h"},
+		},
+		"ssh": map[string]any{
+			"userDurations": map[string]any{"min": "5m", "max": "24h", "default": "16h"},
+			"hostDurations": map[string]any{"min": "5m", "max": "720h", "default": "24h"},
+		},
+	}
+	if got := desired["claims"]; !reflect.DeepEqual(got, want) {
+		t.Errorf("claims = %#v, want %#v", got, want)
 	}
 }
 

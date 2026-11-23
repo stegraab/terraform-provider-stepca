@@ -384,9 +384,10 @@ func buildDesiredProvisioner(ctx context.Context, plan provisionerResourceModel,
 	addOptionalBool(claims, "disableSmallstepExtensions", plan.ClaimsDisableSmallstepExtension)
 
 	x509Durations := map[string]any{}
-	if setOptionalDuration(x509Durations, "min", plan.X509MinDur) ||
-		setOptionalDuration(x509Durations, "max", plan.X509MaxDur) ||
-		setOptionalDuration(x509Durations, "default", plan.X509DefaultDur) {
+	addOptionalStringValue(x509Durations, "min", plan.X509MinDur)
+	addOptionalStringValue(x509Durations, "max", plan.X509MaxDur)
+	addOptionalStringValue(x509Durations, "default", plan.X509DefaultDur)
+	if len(x509Durations) > 0 {
 		x := ensureObject(claims, "x509")
 		x["durations"] = x509Durations
 	}
@@ -396,17 +397,19 @@ func buildDesiredProvisioner(ctx context.Context, plan provisionerResourceModel,
 	}
 
 	sshUserDurations := map[string]any{}
-	if setOptionalDuration(sshUserDurations, "min", plan.SSHUserMinDur) ||
-		setOptionalDuration(sshUserDurations, "max", plan.SSHUserMaxDur) ||
-		setOptionalDuration(sshUserDurations, "default", plan.SSHUserDefaultDur) {
+	addOptionalStringValue(sshUserDurations, "min", plan.SSHUserMinDur)
+	addOptionalStringValue(sshUserDurations, "max", plan.SSHUserMaxDur)
+	addOptionalStringValue(sshUserDurations, "default", plan.SSHUserDefaultDur)
+	if len(sshUserDurations) > 0 {
 		s := ensureObject(claims, "ssh")
 		s["userDurations"] = sshUserDurations
 	}
 
 	sshHostDurations := map[string]any{}
-	if setOptionalDuration(sshHostDurations, "min", plan.SSHHostMinDur) ||
-		setOptionalDuration(sshHostDurations, "max", plan.SSHHostMaxDur) ||
-		setOptionalDuration(sshHostDurations, "default", plan.SSHHostDefaultDur) {
+	addOptionalStringValue(sshHostDurations, "min", plan.SSHHostMinDur)
+	addOptionalStringValue(sshHostDurations, "max", plan.SSHHostMaxDur)
+	addOptionalStringValue(sshHostDurations, "default", plan.SSHHostDefaultDur)
+	if len(sshHostDurations) > 0 {
 		s := ensureObject(claims, "ssh")
 		s["hostDurations"] = sshHostDurations
 	}
@@ -602,15 +605,6 @@ func addOptionalBool(m map[string]any, key string, v types.Bool) {
 		return
 	}
 	m[key] = v.ValueBool()
-}
-
-func setOptionalDuration(m map[string]any, key string, v types.String) bool {
-	value := strings.TrimSpace(stringValue(v))
-	if value == "" {
-		return false
-	}
-	m[key] = value
-	return true
 }
 
 func addOptionalStringValue(m map[string]any, key string, v types.String) {
