@@ -25,6 +25,8 @@ builds:
     ignore:
       - goos: darwin
         goarch: '386'
+      - goos: windows
+        goarch: arm # Removed in Go 1.26.
     binary: '{{ .ProjectName }}_v{{ .Version }}'
 
 archives:
